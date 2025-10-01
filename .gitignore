@@ -130,3 +130,7 @@ pids
 
 # Optional eslint cache
 .eslintcache
+
+# Development guides and documentation that should remain local
+EMULATOR_INTEGRATION_GUIDE.md
+EMULATOR_TESTING_GUIDE.md
