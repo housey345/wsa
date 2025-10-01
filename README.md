@@ -31,6 +31,7 @@ WSA Terminal is a lovingly crafted Python implementation that recreates the auth
 
 - **Windows C: drive integration** - Your C: drive appears as DH0: with full file system access
 - **WinUAE Integration** - Launch real Amiga emulator directly from the command line
+- **Emulator Shared Folders** - Mount WinUAE and FS-UAE shared directories as virtual drives
 - **SAY Command** - Text-to-speech synthesis just like original AmigaOS
 - **PING utility** - Network connectivity testing with authentic output
 - **Tab-based path autocomplete** - Modern convenience for navigation
@@ -169,7 +170,7 @@ WSA Terminal includes all the classic Amiga commands you remember, plus modern e
 - `INFO` - Display comprehensive system information (both simulated Amiga and real system specs)
 - `AVAIL` - List all available commands
 - `STATUS` - Show detailed system status and uptime
-- `MOUNT` - Display mounted volumes and device assignments
+- `MOUNT` - Display mounted volumes, mount emulator shared folders, and manage device assignments
 - `DATE` - Show current date and time
 - `HELP` - Display help information for commands
 
@@ -298,7 +299,47 @@ set WINUAE_PATH=C:\Program Files\WinUAE\winuae.exe
 set WINUAE_CONFIG_DIR=C:\Users\Public\Documents\Amiga Files\WinUAE\Configurations
 ```
 
-### 🗣️ Text-to-Speech (SAY Command)
+### � **Emulator Shared Folder Integration**
+
+Mount WinUAE and FS-UAE shared directories as virtual drives for seamless file transfer:
+
+```bash
+# List available emulator configurations
+mount list winuae                         # Show WinUAE configurations
+mount list fs-uae                         # Show FS-UAE configurations
+mount list                                # Show all configurations
+
+# Mount shared folders from emulator configs
+mount SHARED: FROM WINUAE "My A1200 Config"     # Mount WinUAE shared folder
+mount UAE0: FROM FS-UAE "Workbench31.fs-uae"    # Mount FS-UAE shared folder
+
+# Navigate mounted shared folders
+cd SHARED:                                # Change to shared folder
+dir                                       # List contents with Amiga formatting
+cd Development                            # Navigate subdirectories
+type readme.txt                           # Read files from shared folder
+
+# File operations with shared folders
+copy DH0:myfile.txt SHARED:              # Copy from Windows to emulator
+copy SHARED:project.c DH0:backup/        # Copy from emulator to Windows
+
+# Unmount when finished
+mount unmount SHARED:                     # Unmount shared folder
+```
+
+**Supported Emulators:**
+- **WinUAE** - Parses `.uae` configuration files for `filesystem2=` shared folders
+- **FS-UAE** - Parses `.fs-uae` configuration files for `hard_drive_*` shared directories
+
+**Features:**
+- **Automatic Detection** - Scans standard emulator configuration directories
+- **Real-Time Access** - Browse actual file system contents with live updates
+- **Authentic Formatting** - Display files using genuine Amiga DIR command format
+- **Bidirectional Transfer** - Copy files between modern system and emulator environments
+- **Directory Navigation** - Full `cd`, `dir`, `type` support within shared folders
+- **Access Control** - Respects read-only/read-write permissions from emulator configs
+
+### �🗣️ Text-to-Speech (SAY Command)
 
 Experience authentic Amiga speech synthesis:
 
