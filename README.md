@@ -25,7 +25,7 @@ WSA Terminal is a lovingly crafted Python implementation that recreates the auth
 ### 🌐 **Dual Interface Options**
 
 - **Web Version** (`wsa.py`) - Browser-based terminal with retro CRT effects and WebSocket real-time interaction
-- **Console Version** (`wsa_console.py`) - Direct command-line interface for terminal purists
+- **Console Version (MAIN version!) ** (`wsa_console.py`) - Direct command-line interface for terminal purists
 
 ### 🔗 **Modern Integration**
 
