@@ -7,6 +7,9 @@ WSA Terminal is a lovingly crafted Python implementation that recreates the auth
 > **⚠️ Development Status Notice**  
 > This project is actively under development. While many features are functional, some commands may be partially implemented or not yet working as expected. This project is mainly vibe coded for fun but also to improve my knowledge of the Python programming language.
 
+**_ ! THE CONSOLE VERSION IS BY FAR THE MOST UP TO DATE ! _**
+**_ Try the web version if you like but it's nowhere near as complete. _**
+
 ## ✨ Core Features
 
 ### 🖥️ **Authentic Amiga Experience**
