@@ -15,6 +15,8 @@ import random
 import io
 import contextlib
 import re
+import configparser
+import glob
 from datetime import datetime
 
 # WinUAE Configuration - Global Variables with Fallbacks
@@ -75,6 +77,234 @@ def list_winuae_configs():
     except Exception:
         return []
 
+
+class EmulatorSharedFolder:
+    """Class to handle WinUAE and FS-UAE shared folder mounting"""
+    
+    def __init__(self):
+        self.mounted_shared_folders = {}
+        self.winuae_configs = {}
+        self.fsuae_configs = {}
+        self._scan_emulator_configs()
+    
+    def _scan_emulator_configs(self):
+        """Scan for available WinUAE and FS-UAE configurations"""
+        self._scan_winuae_configs()
+        self._scan_fsuae_configs()
+    
+    def _scan_winuae_configs(self):
+        """Scan for WinUAE configuration files and extract shared folders"""
+        config_dir = WINUAE_CONFIG['config_dir']
+        config_dir = os.path.expanduser(config_dir)
+        config_dir = os.path.expandvars(config_dir)
+        
+        if not os.path.exists(config_dir):
+            return
+        
+        try:
+            for config_file in glob.glob(os.path.join(config_dir, "*.uae")):
+                config_name = os.path.basename(config_file)
+                shared_folders = self._parse_winuae_config(config_file)
+                if shared_folders:
+                    self.winuae_configs[config_name] = {
+                        'path': config_file,
+                        'shared_folders': shared_folders
+                    }
+        except Exception as e:
+            print(f"Warning: Error scanning WinUAE configs: {e}")
+    
+    def _scan_fsuae_configs(self):
+        """Scan for FS-UAE configuration files and extract shared folders"""
+        # Common FS-UAE config locations
+        fsuae_dirs = [
+            os.path.expanduser("~/.config/fs-uae"),
+            os.path.expanduser("~/Documents/FS-UAE/Configurations"),
+            os.path.expanduser("~/.fs-uae")
+        ]
+        
+        for config_dir in fsuae_dirs:
+            if os.path.exists(config_dir):
+                try:
+                    for config_file in glob.glob(os.path.join(config_dir, "*.fs-uae")):
+                        config_name = os.path.basename(config_file)
+                        shared_folders = self._parse_fsuae_config(config_file)
+                        if shared_folders:
+                            self.fsuae_configs[config_name] = {
+                                'path': config_file,
+                                'shared_folders': shared_folders
+                            }
+                except Exception as e:
+                    print(f"Warning: Error scanning FS-UAE configs in {config_dir}: {e}")
+    
+    def _parse_winuae_config(self, config_file):
+        """Parse WinUAE .uae configuration file for shared folders"""
+        shared_folders = {}
+        
+        try:
+            with open(config_file, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    # Look for filesystem2= entries (WinUAE shared folders)
+                    if line.startswith('filesystem2='):
+                        # Format: filesystem2=rw,DH0:Label:C:\Path,0
+                        try:
+                            parts = line.split('=', 1)[1].split(',')
+                            if len(parts) >= 3:
+                                access_mode = parts[0]  # rw, ro, etc.
+                                device_info = parts[1]  # DH0:Label:Path
+                                
+                                if ':' in device_info:
+                                    device_parts = device_info.split(':', 2)
+                                    if len(device_parts) >= 3:
+                                        device = device_parts[0] + ":"
+                                        label = device_parts[1]
+                                        path = device_parts[2]
+                                        
+                                        if os.path.exists(path):
+                                            shared_folders[device] = {
+                                                'label': label,
+                                                'path': path,
+                                                'access': access_mode
+                                            }
+                        except Exception:
+                            continue
+        except Exception as e:
+            print(f"Warning: Could not parse WinUAE config {config_file}: {e}")
+        
+        return shared_folders
+    
+    def _parse_fsuae_config(self, config_file):
+        """Parse FS-UAE .fs-uae configuration file for shared folders"""
+        shared_folders = {}
+        
+        try:
+            with open(config_file, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    # Look for hard_drive_* entries
+                    if line.startswith('hard_drive_') and '=' in line:
+                        try:
+                            key, value = line.split('=', 1)
+                            key = key.strip()
+                            value = value.strip()
+                            
+                            # Extract drive number
+                            if '_' in key:
+                                drive_num = key.split('_')[-1]
+                                
+                                # Skip if it's a label definition
+                                if key.endswith('_label'):
+                                    continue
+                                
+                                # Check if it's a directory path (not a file)
+                                if os.path.isdir(value):
+                                    device = f"DH{drive_num}:"
+                                    
+                                    # Look for corresponding label
+                                    label = f"Drive{drive_num}"
+                                    # This is simplified - in a full implementation,
+                                    # we'd parse the entire file to match labels
+                                    
+                                    shared_folders[device] = {
+                                        'label': label,
+                                        'path': value,
+                                        'access': 'rw'
+                                    }
+                        except Exception:
+                            continue
+        except Exception as e:
+            print(f"Warning: Could not parse FS-UAE config {config_file}: {e}")
+        
+        return shared_folders
+    
+    def mount_shared_folder(self, device, emulator_type, config_name):
+        """Mount a shared folder from emulator configuration"""
+        device = device.upper()
+        if not device.endswith(':'):
+            device += ':'
+        
+        if emulator_type.lower() == 'winuae':
+            if config_name in self.winuae_configs:
+                config = self.winuae_configs[config_name]
+                if device in config['shared_folders']:
+                    folder_info = config['shared_folders'][device]
+                    self.mounted_shared_folders[device] = {
+                        'emulator': 'winuae',
+                        'config': config_name,
+                        'label': folder_info['label'],
+                        'path': folder_info['path'],
+                        'access': folder_info['access']
+                    }
+                    return True, f"{device} mounted from WinUAE config '{config_name}' ({folder_info['label']})"
+                else:
+                    return False, f"Device {device} not found in WinUAE config '{config_name}'"
+            else:
+                return False, f"WinUAE config '{config_name}' not found"
+        
+        elif emulator_type.lower() == 'fs-uae':
+            if config_name in self.fsuae_configs:
+                config = self.fsuae_configs[config_name]
+                if device in config['shared_folders']:
+                    folder_info = config['shared_folders'][device]
+                    self.mounted_shared_folders[device] = {
+                        'emulator': 'fs-uae',
+                        'config': config_name,
+                        'label': folder_info['label'],
+                        'path': folder_info['path'],
+                        'access': folder_info['access']
+                    }
+                    return True, f"{device} mounted from FS-UAE config '{config_name}' ({folder_info['label']})"
+                else:
+                    return False, f"Device {device} not found in FS-UAE config '{config_name}'"
+            else:
+                return False, f"FS-UAE config '{config_name}' not found"
+        
+        else:
+            return False, f"Unknown emulator type: {emulator_type}"
+    
+    def unmount_shared_folder(self, device):
+        """Unmount a shared folder"""
+        device = device.upper()
+        if not device.endswith(':'):
+            device += ':'
+        
+        if device in self.mounted_shared_folders:
+            del self.mounted_shared_folders[device]
+            return True, f"{device} unmounted"
+        else:
+            return False, f"Device {device} is not mounted"
+    
+    def list_available_configs(self):
+        """List all available emulator configurations"""
+        configs = []
+        
+        for config_name, config_info in self.winuae_configs.items():
+            configs.append({
+                'emulator': 'WinUAE',
+                'name': config_name,
+                'shared_folders': list(config_info['shared_folders'].keys())
+            })
+        
+        for config_name, config_info in self.fsuae_configs.items():
+            configs.append({
+                'emulator': 'FS-UAE',
+                'name': config_name,
+                'shared_folders': list(config_info['shared_folders'].keys())
+            })
+        
+        return configs
+    
+    def get_shared_folder_path(self, device):
+        """Get the real path for a mounted shared folder device"""
+        device = device.upper()
+        if not device.endswith(':'):
+            device += ':'
+        
+        if device in self.mounted_shared_folders:
+            return self.mounted_shared_folders[device]['path']
+        return None
+
+
 class WSAConsoleTerminal(cmd.Cmd):
     intro = """WSA Terminal - Windows Subsystem for Amiga
 Copyright (C) 2025 WSA Project Contributors
@@ -108,6 +338,10 @@ Type 'help' or '?' for available commands.
         super().__init__()
         self.current_dir = "SYS:"
         self.prompt = "SYS:> "
+        
+        # Initialize emulator shared folder integration
+        self.emulator_integration = EmulatorSharedFolder()
+        
         # Add Windows C: drive by default
         self.directories = {
             "SYS:": ["Prefs", "Tools", "L", "S", "C", "DEVS", "Fonts", "WBStartup"],
@@ -505,8 +739,101 @@ Type 'help' or '?' for available commands.
         print(self._status_command())
         
     def do_mount(self, arg):
-        """MOUNT - Show mounted volumes"""
-        print(self._mount_command())
+        """MOUNT - Show mounted volumes or mount emulator shared folders
+        
+        Usage:
+          MOUNT                                    - Show mounted volumes
+          MOUNT <device> FROM WINUAE <config>     - Mount WinUAE shared folder
+          MOUNT <device> FROM FS-UAE <config>     - Mount FS-UAE shared folder
+          MOUNT LIST WINUAE                       - List WinUAE configurations
+          MOUNT LIST FS-UAE                       - List FS-UAE configurations
+          MOUNT UNMOUNT <device>                  - Unmount shared folder
+        
+        Examples:
+          MOUNT SHARED: FROM WINUAE "My A1200 Config"
+          MOUNT UAE0: FROM FS-UAE "Workbench31.fs-uae"
+          MOUNT LIST WINUAE
+          MOUNT UNMOUNT SHARED:
+        """
+        if not arg:
+            # Show mounted volumes
+            print(self._mount_command())
+            return
+        
+        args = arg.split()
+        if len(args) == 0:
+            print(self._mount_command())
+            return
+        
+        # Handle LIST commands
+        if args[0].upper() == "LIST":
+            if len(args) > 1 and args[1].upper() == "WINUAE":
+                self._list_winuae_configs()
+                return
+            elif len(args) > 1 and args[1].upper() == "FS-UAE":
+                self._list_fsuae_configs()
+                return
+            else:
+                self._list_all_emulator_configs()
+                return
+        
+        # Handle UNMOUNT commands
+        if args[0].upper() == "UNMOUNT":
+            if len(args) > 1:
+                device = args[1]
+                success, message = self.emulator_integration.unmount_shared_folder(device)
+                print(message)
+                if success:
+                    # Remove from our directories
+                    device = device.upper()
+                    if not device.endswith(':'):
+                        device += ':'
+                    if device in self.directories:
+                        del self.directories[device]
+            else:
+                print("Usage: MOUNT UNMOUNT <device>")
+            return
+        
+        # Handle mount commands: DEVICE FROM EMULATOR CONFIG
+        if len(args) >= 4 and args[1].upper() == "FROM":
+            device = args[0]
+            emulator_type = args[2]
+            config_name = " ".join(args[3:]).strip('"')  # Handle quoted config names
+            
+            success, message = self.emulator_integration.mount_shared_folder(device, emulator_type, config_name)
+            print(message)
+            
+            if success:
+                # Add to our directories for navigation
+                device = device.upper()
+                if not device.endswith(':'):
+                    device += ':'
+                
+                # Get the actual path and populate directory listing
+                shared_path = self.emulator_integration.get_shared_folder_path(device)
+                if shared_path and os.path.exists(shared_path):
+                    try:
+                        contents = os.listdir(shared_path)
+                        self.directories[device] = [item for item in contents if os.path.isdir(os.path.join(shared_path, item))]
+                    except Exception as e:
+                        print(f"Warning: Could not read shared folder contents: {e}")
+                        self.directories[device] = []
+            return
+        
+        # If we get here, show usage
+        print("Usage:")
+        print("  MOUNT                                    - Show mounted volumes")
+        print("  MOUNT <device> FROM WINUAE <config>     - Mount WinUAE shared folder")
+        print("  MOUNT <device> FROM FS-UAE <config>     - Mount FS-UAE shared folder")
+        print("  MOUNT LIST WINUAE                       - List WinUAE configurations")
+        print("  MOUNT LIST FS-UAE                       - List FS-UAE configurations")
+        print("  MOUNT UNMOUNT <device>                  - Unmount shared folder")
+        print("")
+        print("Examples:")
+        print("  MOUNT SHARED: FROM WINUAE \"My A1200 Config\"")
+        print("  MOUNT UAE0: FROM FS-UAE \"Workbench31.fs-uae\"")
+        print("  MOUNT LIST WINUAE")
+        print("  MOUNT UNMOUNT SHARED:")
         
     def do_echo(self, arg):
         """ECHO <text> - Echo text to terminal"""
@@ -1454,6 +1781,91 @@ Examples:
             else:
                 return "01-Jan-85"
     
+    def _list_shared_folder_files(self, path, device):
+        """List files in emulator shared folder with Amiga DIR command format"""
+        shared_info = self.emulator_integration.mounted_shared_folders[device]
+        base_path = shared_info['path']
+        
+        # Determine the actual file system path
+        if path == device:
+            fs_path = base_path
+        else:
+            # Handle subdirectories within the shared folder
+            sub_path = path[len(device):]
+            if sub_path.startswith('/'):
+                sub_path = sub_path[1:]
+            fs_path = os.path.join(base_path, sub_path.replace('/', os.sep))
+        
+        fs_path = os.path.normpath(fs_path)
+        
+        if not os.path.exists(fs_path) or not os.path.isdir(fs_path):
+            print(f"Directory {path} not found.")
+            return
+        
+        try:
+            # Authentic Amiga DIR header
+            day_name = self._format_amiga_day(file_path=fs_path)
+            header_date = self._format_amiga_date(file_path=fs_path)
+            emulator = shared_info['emulator'].upper()
+            config = shared_info['config']
+            print(f'Directory "{path}" on {day_name} {header_date}')
+            print(f'({emulator} Shared Folder: "{shared_info["label"]}" from {config})')
+            
+            # List directory contents
+            try:
+                items = os.listdir(fs_path)
+            except PermissionError:
+                print("Access denied to this directory.")
+                return
+            except Exception as e:
+                print(f"Error reading directory: {e}")
+                return
+            
+            dirs = []
+            files = []
+            
+            # Separate directories and files
+            for item in items:
+                item_path = os.path.join(fs_path, item)
+                try:
+                    if os.path.isdir(item_path):
+                        dirs.append(item)
+                    else:
+                        files.append(item)
+                except:
+                    # If we can't access the item, treat it as a file
+                    files.append(item)
+            
+            # Sort directories and files
+            dirs.sort(key=str.lower)
+            files.sort(key=str.lower)
+            
+            # Print directories first (authentic Amiga format)
+            for dir_name in dirs:
+                dir_path = os.path.join(fs_path, dir_name)
+                date_str = self._format_amiga_date(file_path=dir_path, full_format=True)
+                print(f" {dir_name:<22} (dir)    ----rwed     {date_str}")
+            
+            # Print files (authentic Amiga format)  
+            total_bytes = 0
+            for file_name in files:
+                file_path = os.path.join(fs_path, file_name)
+                try:
+                    file_size = os.path.getsize(file_path)
+                    total_bytes += file_size
+                except:
+                    file_size = 0
+                date_str = self._format_amiga_date(file_path=file_path, full_format=True)
+                print(f" {file_name:<22} {file_size:>7}  ----rwed     {date_str}")
+            
+            dir_count = len(dirs)
+            file_count = len(files)
+            access_note = " (Read-Only)" if shared_info['access'] == 'ro' else ""
+            print(f"{dir_count + file_count} files - {dir_count} directories - {total_bytes} bytes used{access_note}")
+            
+        except Exception as e:
+            print(f"Error accessing shared folder {path}: {e}")
+
     def _format_amiga_day(self, timestamp=None, file_path=None):
         """Format day of week in Amiga style"""
         try:
@@ -1759,6 +2171,15 @@ Examples:
         else:
             # Resolve relative paths
             path = self._resolve_path(path)
+        
+        # Check if this is a mounted emulator shared folder
+        device = path.split('/')[0] if '/' in path else path
+        device = device.upper()
+        if not device.endswith(':'):
+            device += ':'
+        
+        if device in self.emulator_integration.mounted_shared_folders:
+            return self._list_shared_folder_files(path, device)
             
         # Handle DH0: (Windows C: drive) with actual file system access
         if path.upper().startswith("DH0:"):
@@ -2026,6 +2447,15 @@ Examples:
                     
     def _change_directory(self, path):
         """Change directory"""
+        # Check if this is a mounted emulator shared folder
+        device = path.split('/')[0] if '/' in path else path
+        device = device.upper()
+        if not device.endswith(':'):
+            device += ':'
+        
+        if device in self.emulator_integration.mounted_shared_folders:
+            return self._change_shared_folder_directory(path, device)
+        
         # Handle DH0: (Windows C: drive)
         if path.upper() == "DH0:":
             self.current_dir = "DH0:"
@@ -2420,14 +2850,124 @@ Type 'info' for detailed system information
 Type 'mount' to see mounted volumes
 Type 'dir' to list current directory contents"""
         
+    def _change_shared_folder_directory(self, path, device):
+        """Change directory within emulator shared folder"""
+        shared_info = self.emulator_integration.mounted_shared_folders[device]
+        base_path = shared_info['path']
+        
+        # Determine the actual file system path
+        if path == device:
+            fs_path = base_path
+            self.current_dir = device
+        else:
+            # Handle subdirectories within the shared folder
+            sub_path = path[len(device):]
+            if sub_path.startswith('/'):
+                sub_path = sub_path[1:]
+            fs_path = os.path.join(base_path, sub_path.replace('/', os.sep))
+            
+            # Verify the directory exists
+            fs_path = os.path.normpath(fs_path)
+            if not os.path.exists(fs_path) or not os.path.isdir(fs_path):
+                return f"Directory {path} not found."
+            
+            self.current_dir = path
+        
+        self.prompt = f"{self.current_dir}> "
+        return ""
+
+    def _list_winuae_configs(self):
+        """List available WinUAE configurations with their shared folders"""
+        if not self.emulator_integration.winuae_configs:
+            print("No WinUAE configurations found.")
+            print("Make sure WinUAE is installed and configurations exist in:")
+            print(f"  {WINUAE_CONFIG['config_dir']}")
+            return
+        
+        print("Available WinUAE Configurations:")
+        print("=" * 40)
+        for config_name, config_info in self.emulator_integration.winuae_configs.items():
+            print(f"\n  Config: {config_name}")
+            print(f"  Path:   {config_info['path']}")
+            if config_info['shared_folders']:
+                print("  Shared Folders:")
+                for device, folder_info in config_info['shared_folders'].items():
+                    access_str = "(Read-Write)" if folder_info['access'] == 'rw' else "(Read-Only)"
+                    print(f"    {device} \"{folder_info['label']}\" -> {folder_info['path']} {access_str}")
+            else:
+                print("  No shared folders configured")
+    
+    def _list_fsuae_configs(self):
+        """List available FS-UAE configurations with their shared folders"""
+        if not self.emulator_integration.fsuae_configs:
+            print("No FS-UAE configurations found.")
+            print("Make sure FS-UAE is installed and configurations exist in:")
+            print("  ~/.config/fs-uae/")
+            print("  ~/Documents/FS-UAE/Configurations/")
+            return
+        
+        print("Available FS-UAE Configurations:")
+        print("=" * 40)
+        for config_name, config_info in self.emulator_integration.fsuae_configs.items():
+            print(f"\n  Config: {config_name}")
+            print(f"  Path:   {config_info['path']}")
+            if config_info['shared_folders']:
+                print("  Shared Folders:")
+                for device, folder_info in config_info['shared_folders'].items():
+                    print(f"    {device} \"{folder_info['label']}\" -> {folder_info['path']}")
+            else:
+                print("  No shared folders configured")
+    
+    def _list_all_emulator_configs(self):
+        """List all available emulator configurations"""
+        configs = self.emulator_integration.list_available_configs()
+        
+        if not configs:
+            print("No emulator configurations found.")
+            print("Make sure WinUAE and/or FS-UAE are installed with valid configurations.")
+            return
+        
+        print("Available Emulator Configurations:")
+        print("=" * 50)
+        
+        winuae_configs = [c for c in configs if c['emulator'] == 'WinUAE']
+        fsuae_configs = [c for c in configs if c['emulator'] == 'FS-UAE']
+        
+        if winuae_configs:
+            print("\nWinUAE Configurations:")
+            for config in winuae_configs:
+                shared_devices = ", ".join(config['shared_folders']) if config['shared_folders'] else "None"
+                print(f"  {config['name']} (Devices: {shared_devices})")
+        
+        if fsuae_configs:
+            print("\nFS-UAE Configurations:")
+            for config in fsuae_configs:
+                shared_devices = ", ".join(config['shared_folders']) if config['shared_folders'] else "None"
+                print(f"  {config['name']} (Devices: {shared_devices})")
+        
+        print("\nUsage:")
+        print("  MOUNT <device> FROM WINUAE \"<config_name>\"")
+        print("  MOUNT <device> FROM FS-UAE \"<config_name>\"")
+
     def _mount_command(self):
         """Mounted volumes"""
         output = "Mounted volumes:\n"
+        
+        # Show standard volumes
         for vol in self.directories:
             if vol.upper() == "DH0:":
                 output += f"  {vol} (Windows C: Drive)\n"
+            elif vol in self.emulator_integration.mounted_shared_folders:
+                # Show emulator shared folder info
+                shared_info = self.emulator_integration.mounted_shared_folders[vol]
+                emulator = shared_info['emulator'].upper()
+                label = shared_info['label']
+                config = shared_info['config']
+                access = " (Read-Only)" if shared_info['access'] == 'ro' else ""
+                output += f"  {vol} ({emulator} Shared: \"{label}\" from {config}){access}\n"
             else:
                 output += f"  {vol}\n"
+        
         return output
         
     def _help_command(self):
