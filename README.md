@@ -5,7 +5,7 @@
 WSA Terminal is a lovingly crafted Python implementation that recreates the authentic Amiga Workbench command-line interface, complete with classic commands, retro styling, and modern integration features. Whether you're a nostalgic Amiga enthusiast or curious about computing history, WSA Terminal brings the magic of AmigaOS to your Windows, Linux, or WSL environment.
 
 > **⚠️ Development Status Notice**  
-> This project is actively under development. While many features are functional, some commands may be partially implemented or not yet working as expected. This project is mainly vibe coded using for fun but also to improve my knowledge of the Python programming language.
+> This project is actively under development. While many features are functional, some commands may be partially implemented or not yet working as expected. This project is mainly vibe coded for fun but also to improve my knowledge of the Python programming language.
 
 ## ✨ Core Features
 
